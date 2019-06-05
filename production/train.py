@@ -1,6 +1,6 @@
 import tensorflow as tf
 import sys
-
+import os
 
 def get_feature_column():
     '''
@@ -126,9 +126,76 @@ def train_wd_model(model_es, train_file, test_file, model_export_folder, serving
         model_export_folder: model export for tf serving
         serving_input_fn: function for model export
     '''
+    total_run = 6
+    #for index in range(total_run):
     model_es.train(input_fn=lambda:input_fn(train_file,20,True,100,False))
-    model_es.evaluate(input_fn=lambda:input_fn(test_file,1,False,100,False))
+    print(model_es.evaluate(input_fn=lambda:input_fn(test_file,1,False,100,False)))
+        #model_es.evaluate(input_fn=lambda: input_fn(test_file, 1, False, 100, False))
     model_es.export_savedmodel(model_export_folder, serving_input_fn)
+
+def get_auc(predict_list, test_label):
+    total_list = []
+    for index in range(len(predict_list)):
+        predict_score = predict_list[index]
+        label = test_label[index]
+        total_list.append((label, predict_score))
+    sorted_total_list = sorted(total_list, key=lambda ele:ele[1])
+    neg_num = 0
+    pos_num = 0
+    count = 1
+    total_pos_index = 0
+    for zuhe in sorted_total_list:
+        label, predict_score = zuhe
+        if label == 0:
+            neg_num += 1
+        else:
+            pos_num += 1
+            total_pos_index +=count
+        count += 1
+
+    auc_score = (total_pos_index - (pos_num)*(pos_num+1)/2)/(pos_num*neg_num)
+    print('auc%.5f' %(auc_score))
+
+def get_test_label(test_file):
+    '''
+    get label of test file
+    '''
+    if not os.path.exists(test_file):
+        return []
+    f = open(test_file)
+    linenum = 0
+    test_label_list = []
+    for line in f:
+        if linenum==0:
+            linenum+=1
+            continue
+        if '?' in line.strip():
+            continue
+
+        item = line.strip().split(',')
+        label_str = item[-1]
+        if label_str==' >50K':
+            test_label_list.append(1)
+        elif label_str == ' <=50K':
+            test_label_list.append(0)
+        else:
+            print('error')
+    f.close()
+    return test_label_list
+
+def test_model_performance(model_es, test_file):
+    '''
+    test model auc in test data
+    '''
+    test_label = get_test_label(test_file)
+
+    predict_list = []
+    result = model_es.predict(input_fn = lambda :input_fn(test_file,1,False,100,True))
+    for one_res in result:
+        if 'probabilities' in one_res:
+            predict_list.append(one_res['probabilities'][1])
+
+    get_auc(predict_list, test_label)
 
 
 def run_main(train_file, test_file, model_folder, model_export_folder):
@@ -144,6 +211,7 @@ def run_main(train_file, test_file, model_folder, model_export_folder):
     model_es, serving_input_fn = build_model_estimator(wide_column, deep_column, model_folder)
 
     train_wd_model(model_es, train_file, test_file, model_export_folder, serving_input_fn)
+    test_model_performance(model_es, test_file)
 
 
 if __name__=='__main__':
